@@ -19,8 +19,8 @@ Jaffedrone.
 
 ## Install
 
-1. Build it (see below), or download `ColumbiaStreet-miyoo.zip` from the latest CI build or
-   release.
+1. Build it (see below), or download `ColumbiaStreet-miyoo.zip` from the latest release, or
+   from the artifacts of the latest run on the Actions tab.
 2. Unzip at the root of the OnionOS SD card, so the app lands in `SD:/App/ColumbiaStreet`. With
    the card mounted you can also run `make install SD=/run/media/$USER/<card>`.
 3. Launch **Columbia Street** from Apps. Press MENU to quit.
@@ -119,6 +119,14 @@ make zip          # package dist/ColumbiaStreet as build/ColumbiaStreet.zip
 make install SD=/path/to/mounted/sdcard
 make package CROSS=/opt/miyoomini-toolchain/usr/bin/arm-linux-gnueabihf-   # OnionOS gcc, as CI does
 ```
+
+### Releases
+
+CI (`.github/workflows/build.yml`) builds the Miyoo package and runs the tests on every push.
+To publish a release with `ColumbiaStreet-miyoo.zip` attached, push a version tag (`git tag
+v0.1.0 && git push origin v0.1.0`), or run the workflow from the Actions tab with a tag in
+`release_tag`. Releases are marked as test builds and use `.github/release-notes.md` as their
+notes; running again for the same tag replaces the zip.
 
 The build links against Onion's own MI_AO/MI_GFX-backed SDL 1.2, which `make` downloads into
 `third_party/onion-lib/` (not committed).
