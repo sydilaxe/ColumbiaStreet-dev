@@ -1,0 +1,58 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  miyoo:
+    name: Miyoo Mini Plus package
+    runs-on: ubuntu-latest
+    container: aemiii91/miyoomini-toolchain:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          # generated files are committed; keep make from regenerating them
+          touch src/font_data.h dist/ColumbiaStreet/icon.png
+          command -v zip >/dev/null && command -v curl >/dev/null || (apt-get update && apt-get install -y zip curl)
+          make package CROSS=/opt/miyoomini-toolchain/usr/bin/arm-linux-gnueabihf-
+          ls -l build/ColumbiaStreet-miyoo.zip
+          unzip -l build/ColumbiaStreet-miyoo.zip | grep -q "App/ColumbiaStreet/breaks/AMEN_153bpm.wav"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ColumbiaStreet-miyoo
+          path: build/ColumbiaStreet-miyoo.zip
+
+  test:
+    name: Engine and UI tests (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the test harness
+        run: |
+          touch src/font_data.h dist/ColumbiaStreet/icon.png
+          sh tools/fetch_samples.sh dist/ColumbiaStreet
+          make build/cs_test
+          mkdir -p build/test
+          build/cs_test build/test dist/ColumbiaStreet | tee build/test/results.txt
+      - name: Check the results
+        run: |
+          r=build/test/results.txt
+          grep -q "^samples: 7 banks, 20 bass" $r
+          grep -q "0 full-scale samples (want 0)" $r
+          grep -q "^grid straight: .*(want all and over 0.99: 1)" $r
+          grep -q "^fit: .*(want about half: 1)" $r
+          grep -q "^bits  1: 3 output levels" $r
+          awk '/^bits  4:/ { exit !($3 + 0 <= 16) }' $r
+          grep -q "^comp: .*(want over 6: 1)" $r
+          grep -q "^generator: 199 seeds, 0 identical pairs, 0 out of range" $r
+          grep -q "^save/load: 1, same 1, bpm 163.5, bits 7, slot D used 1" $r
+          grep -q "^bass voices: 24, 0 silent (want 0)" $r
+          grep -q "^sync: bpm=140.0 following=1" $r
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output
+          path: build/test/

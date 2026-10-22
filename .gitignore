@@ -1,0 +1,12 @@
+build/
+third_party/onion-lib/
+dist/ColumbiaStreet/columbia
+dist/ColumbiaStreet/columbia.sav
+dist/ColumbiaStreet/columbia.sav.tmp
+dist/ColumbiaStreet/log.txt
+# samples are fetched by tools/fetch_samples.sh, never committed
+dist/ColumbiaStreet/breaks/*
+!dist/ColumbiaStreet/breaks/README.txt
+dist/ColumbiaStreet/bass/*
+!dist/ColumbiaStreet/bass/README.txt
+__pycache__/

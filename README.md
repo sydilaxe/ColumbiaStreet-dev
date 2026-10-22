@@ -1,0 +1,144 @@
+# Columbia Street
+
+A five-channel jungle sequencer for the Miyoo Mini Plus running OnionOS.
+
+Four break channels play slices of sampled drum breaks: the Amen and other loops, chopped at their
+hits. The fifth channel is a bass: a sub, a Reese, an 808, an FM growl, or one of 20 jungle bass
+samples, played through a short riff. Each channel is sequenced by three polymetric Euclidean
+cells:
+
+- **HIT** plays a slice.
+- **ROLL** ratchets it: snare rolls, ×2 up to ×8 in one step.
+- **ALT** varies it: reverse, an octave up or down, the next slice, a random slice, or a stop.
+
+Every break channel has its own pitch, a filter, a **bit depth from 1 to 24 bits**, sample-rate
+reduction and a **compressor**. On the bus are a glue compressor, drive, a reverb, a
+tempo-synced L2 filter sweep, and punch-in repeat, reverse and tape-stop effects. Eight
+pattern slots switch on the bar line, and the unit syncs tempo over Wi-Fi with HI5 and
+Jaffedrone.
+
+## Install
+
+1. Build it (see below), or download `ColumbiaStreet-miyoo.zip` from the latest CI build or
+   release.
+2. Unzip at the root of the OnionOS SD card, so the app lands in `SD:/App/ColumbiaStreet`. With
+   the card mounted you can also run `make install SD=/run/media/$USER/<card>`.
+3. Launch **Columbia Street** from Apps. Press MENU to quit.
+
+The state autosaves to `columbia.sav` in the app folder.
+
+## The breaks
+
+`make` fetches a curated set into `dist/ColumbiaStreet/breaks` and `bass` from TidalCycles'
+[Dirt-Samples](https://github.com/tidalcycles/Dirt-Samples), pinned to one commit, with
+`tools/fetch_samples.sh`:
+
+| Bank | What it is |
+| --- | --- |
+| AMEN | The Amen break, 3 bars at 153 BPM, cut at its 28 hits |
+| AMENCU | The Amen pre-chopped into 32 slices |
+| PLEAD, RAWCLN, SDSTCK, BLLSTP | Four more breaks, 125-165 BPM |
+| JUNGLE | A jungle hit kit: kicks, snares, hats, ride, crash, percussion |
+| bass/ | 20 jungle subs and basses for the BASS channel |
+
+The recordings are not committed to this repo. They keep their original rights: the Amen comes
+from The Winstons' "Amen, Brother", and Dirt-Samples does not state a licence for these folders.
+The release zip includes them, so check that this is acceptable to you before publishing
+one.
+
+### Your own breaks
+
+Drop any break into `App/ColumbiaStreet/breaks/` (Apache, Think, Funky Drummer...). A `.wav`
+file is a loop, sliced at its hits. Put the tempo in its name (`APACHE_115bpm.wav`) and the
+slices land on the 16th grid; without a tempo, it is guessed from the length. A folder of
+`.wav` files is a pre-chopped break, one slice per file in name order. Bass one-shots go in
+`bass/`; their pitch is detected on load. See the README.txt in each folder.
+
+## Controls
+
+These work on every page:
+
+| Button | Action |
+| --- | --- |
+| L1 / R1 | Previous / next page |
+| START | Play / stop |
+| SELECT | A new jungle beat on all five channels; R2+SELECT undoes it |
+| L2 (hold) | Low-pass sweep, closing over the time set on MIX > MASTER > L2 |
+| R2 + up / right | Repeat the last 1/8 / 1/16 |
+| R2 + left / down | Reverse / tape stop |
+| R2 + X | Tap tempo (taps under 100 BPM count double) |
+| MENU | Quit |
+
+The pages are PATTERN, CHOP, BASS, MIX and SONG. The footer shows each page's keys.
+
+- **PATTERN**: a 5 × 3 grid of cells, one row per channel. The d-pad picks a cell. A turns it
+  on or off, X / Y add or remove hits. Hold B and press up / down to change the length (1-32
+  steps), or left / right to rotate. A tap of B rolls a random Euclidean rhythm.
+- **CHOP**: one break channel at a time (left / right). The waveform shows the bank's slices,
+  the ones this channel can pick, and the slice playing. Up / down picks a parameter, X / Y
+  change it, A plays the slice, B mutes the channel.
+  - **BREAK, SLICE**: the bank, and the slice to play.
+  - **MODE**: FIX plays SLICE every hit. WALK steps through RANGE slices from SLICE, one per
+    hit. RAND picks one of them at random. GRID plays the slice that falls on this step of the
+    break, so a full HIT cell plays the break straight and a thinner one drops hits out.
+  - **PITCH** in semitones. **FIT** speeds the break up or slows it down to the tempo, as
+    jungle does.
+  - **LENGTH** cuts the slice short. **ROLL** is the ratchet count, **ALT** what the ALT cell
+    does.
+  - **FILTER**: left of OPEN is a low-pass, right a high-pass.
+  - **BITS**: 24 down to 1. **RATE**: sample-rate reduction down to 1.5 kHz.
+  - **COMP**: 0 is off; higher lowers the threshold and raises the ratio together (to -36 dB
+    and 8:1, 2 ms attack), with make-up gain. The bar under it shows the gain reduction.
+- **BASS**: WAVE, ROOT, OCTAVE and a RIFF (a short note pattern; each hit plays the next note,
+  restarting every two bars). LENGTH is the note length in 16ths, or HOLD. Also GLIDE, CUTOFF,
+  RESO, WIDTH (Reese detune, growl wobble, sub warmth), DRIVE, ROLL and ALT (octave up, fifth,
+  octave down, slide, rest).
+- **MIX**: a column per channel (LEVEL, PAN, SEND to the reverb) and the master (LEVEL, GLUE
+  compressor, DRIVE, VERB time, TONE, and the L2 sweep time). A mutes, B solos.
+- **SONG**: pattern slots A-H. A loads a slot (at the next bar while playing), X saves the
+  pattern into it, R2+Y clears it. Below them are the tempo and the Wi-Fi sync mode.
+
+## Wi-Fi sync
+
+Columbia Street speaks HI5S, the sync protocol of HI5 and Jaffedrone. Units on the same network
+share tempo, bar phase and transport over UDP broadcast on port 5150. Set the mode on the SONG
+page: OFF, AUTO, LEAD or FOLLOW. A unit set to LEAD wins; otherwise the lowest id leads.
+OnionOS Wi-Fi must be on.
+
+## Building
+
+You need [zig](https://ziglang.org/) 0.14 for the cross-compile; the Makefile looks in
+`~/.local/opt/zig-aarch64-linux-0.14.1/zig`, or set `ZIG=...` (`pip install ziglang==0.14.1`
+also provides it). You also need `curl`, `python3` (with Pillow for the icon), and for `make
+test` a host C compiler and ImageMagick.
+
+```sh
+make              # cross-compile dist/ColumbiaStreet/columbia and fetch the samples
+make test         # host harness: screenshots, audio and engine checks into build/test
+make zip          # package dist/ColumbiaStreet as build/ColumbiaStreet.zip
+make install SD=/path/to/mounted/sdcard
+make package CROSS=/opt/miyoomini-toolchain/usr/bin/arm-linux-gnueabihf-   # OnionOS gcc, as CI does
+```
+
+The build links against Onion's own MI_AO/MI_GFX-backed SDL 1.2, which `make` downloads into
+`third_party/onion-lib/` (not committed).
+
+### Layout
+
+| Path | Contents |
+| --- | --- |
+| `src/engine.c` | Sequencer, slice playback, channel effects, bass voices, bus, save / load |
+| `src/breaks.c` | WAV loading, onset slicing, bass pitch detection |
+| `src/ui.c` | Pages, input, drawing |
+| `src/gfx.c`, `src/font_data.h` | Framebuffer drawing and the font |
+| `src/sync.c` | Wi-Fi sync |
+| `src/main_sdl.c` | Device entry point (SDL audio + video) |
+| `src/main_test.c` | Host test harness |
+| `tools/fetch_samples.sh` | Fetches the curated breaks and basses |
+| `dist/ColumbiaStreet/` | The app folder as installed on the card |
+
+## License
+
+MIT. See [LICENSE](LICENSE). The SDL 1.2 headers in `third_party/` and Onion's SDL library
+are under the LGPL; see `third_party/SDL-1.2.15-headers/COPYING`. The font is Noto Sans Mono
+(SIL OFL 1.1). The samples are not part of this repo and are not covered by its licence.
