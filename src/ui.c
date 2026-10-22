@@ -60,7 +60,9 @@ static const char *const mxm_names[NMXM] = {"LEVEL", "GLUE", "DRIVE", "VERB", "T
 /* song page stops: slots A..H, then TEMPO and SYNC */
 #define SG_TEMPO NSLOT
 #define SG_SYNC (NSLOT + 1)
-#define SG_N (NSLOT + 2)
+#define SG_OUT (NSLOT + 2) /* OUTPUT, CLOCK ON, PPQN, PULSE: left / right picks one */
+#define SG_N (NSLOT + 3)
+static int out_f;
 
 static void say(const char *fmt, ...)
 {
@@ -294,7 +296,7 @@ static void song_action(int b, int repeats)
         int d = b == BTN_DOWN ? 1 : -1;
         if (song_cur < NSLOT) {
             int r = song_cur / 4 + d;
-            song_cur = r < 0 ? SG_SYNC : r < 2 ? r * 4 + song_cur % 4 : SG_TEMPO;
+            song_cur = r < 0 ? SG_N - 1 : r < 2 ? r * 4 + song_cur % 4 : SG_TEMPO;
         }
         else {
             int s = song_cur + d;
@@ -305,6 +307,8 @@ static void song_action(int b, int repeats)
     if (b == BTN_LEFT || b == BTN_RIGHT) {
         if (song_cur < NSLOT)
             song_cur = (song_cur / 4) * 4 + wrap(song_cur % 4 + (b == BTN_RIGHT ? 1 : -1), 4);
+        else if (song_cur == SG_OUT)
+            out_f = wrap(out_f + (b == BTN_RIGHT ? 1 : -1), 4);
         return;
     }
     if (song_cur == SG_TEMPO) {
@@ -320,6 +324,27 @@ static void song_action(int b, int repeats)
             engine_set_rate(1.0);
             say("WIFI SYNC  %s", sync_mode_names[song.sync_mode]);
         }
+        return;
+    }
+    if (song_cur == SG_OUT) {
+        if (b != BTN_X && b != BTN_Y && b != BTN_A)
+            return;
+        int d = b == BTN_Y ? -1 : 1;
+        if (out_f == 0 && !repeats) {
+            song.out_mode = !song.out_mode;
+            say("%s", song.out_mode == OUT_MONO_CLOCK ? "MONO AUDIO + CLOCK OUT" : "STEREO OUT");
+        }
+        else if (out_f == 1 && !repeats) {
+            song.clk_side = !song.clk_side;
+            say("CLOCK ON THE %s", song.clk_side ? "LEFT" : "RIGHT");
+        }
+        else if (out_f == 2 && b != BTN_A) {
+            song.clk_ppqn = clampi(song.clk_ppqn + d, 0, NPPQN - 1);
+            int q = clk_ppqn_value(song.clk_ppqn);
+            say("%d PPQN%s", q, q == 2 ? "  POCKET OPERATOR / VOLCA" : q == 24 ? "  DIN SYNC" : "");
+        }
+        else if (out_f == 3 && b != BTN_A)
+            song.clk_width = clampi(song.clk_width + d, 1, 20);
         return;
     }
     int i = song_cur;
@@ -393,7 +418,7 @@ static int repeatable(int b)
     if (held[BTN_R2])
         return 0;
     if (b == BTN_X || b == BTN_Y)
-        return page != PAGE_SONG || song_cur == SG_TEMPO;
+        return page != PAGE_SONG || song_cur == SG_TEMPO || (song_cur == SG_OUT && out_f >= 2);
     return 0;
 }
 
@@ -545,7 +570,7 @@ static void draw_footer(void)
     };
     const char *hint = hints[page];
     if (page == PAGE_SONG && song_cur >= NSLOT)
-        hint = song_cur == SG_TEMPO ? "X/Y:TEMPO  R2+X:TAP" : "X/Y:SYNC MODE";
+        hint = song_cur == SG_TEMPO ? "X/Y:TEMPO  R2+X:TAP" : song_cur == SG_SYNC ? "X/Y:SYNC MODE" : "<>:SETTING  X/Y:+/-";
     gfx_fill(0, FOOTER_Y, SCREEN_W, SCREEN_H - FOOTER_Y, C_PANEL);
     gfx_text(10, FOOTER_Y + 3, hint, C_DIM, FONT_SMALL);
     text_r(SCREEN_W - 10, FOOTER_Y + 3, "SEL:NEW BEAT", C_DIM, FONT_SMALL);
@@ -791,6 +816,8 @@ static void draw_mix(void)
             char val[16];
             if (v < NV) {
                 int x2 = r == MX_LEVEL ? song.vol[v] : r == MX_PAN ? song.pan[v] : song.send[v];
+                if (r == MX_PAN && song.out_mode == OUT_MONO_CLOCK)
+                    x2 = 0; /* mono + clock: every channel from the centre (the pan is kept) */
                 if (r == MX_PAN)
                     snprintf(val, sizeof val, x2 == 0 ? "C" : x2 < 0 ? "L%d" : "R%d", x2 < 0 ? -x2 : x2);
                 else
@@ -861,10 +888,31 @@ static void draw_song(void)
         }
         text_r(620, yy + 8, val, C_TEXT, FONT_SMALL);
     }
+    /* the output: four settings in one row */
+    {
+        int yy = y + 88, row = song_cur == SG_OUT, clk = song.out_mode == OUT_MONO_CLOCK;
+        static const char *const nm[4] = {"OUTPUT", "CLOCK ON", "PPQN", "PULSE"};
+        for (int k = 0; k < 4; k++) {
+            int x = 8 + k * 157, w = 150, sel = row && out_f == k, on = k == 0 || clk;
+            gfx_fill(x, yy, w, 38, sel ? C_PANEL2 : C_PANEL);
+            gfx_rect(x, yy, w, 38, sel ? 2 : 1, sel ? C_ACCENT : C_LINE);
+            gfx_text(x + 10, yy + 8, nm[k], sel ? C_TEXT : C_DIM, FONT_SMALL);
+            char val[24];
+            if (k == 0)
+                snprintf(val, sizeof val, "%s", clk ? "MONO+CLK" : "STEREO");
+            else if (k == 1)
+                snprintf(val, sizeof val, "%s", song.clk_side ? "LEFT" : "RIGHT");
+            else if (k == 2)
+                snprintf(val, sizeof val, "%d", clk_ppqn_value(song.clk_ppqn));
+            else
+                snprintf(val, sizeof val, "%dMS", song.clk_width);
+            text_r(x + w - 10, yy + 8, val, on ? (k == 0 && clk ? C_ACCENT : C_TEXT) : C_DIM, FONT_SMALL);
+        }
+    }
     char s[96];
     snprintf(s, sizeof s, "%d BREAKS, %d BASS SAMPLES LOADED", nbanks, nbass);
-    gfx_text(12, y + 96, s, C_DIM, FONT_SMALL);
-    gfx_text(12, y + 120, "SLOTS LOAD AT THE NEXT BAR WHILE PLAYING", C_DIM, FONT_SMALL);
+    gfx_text(12, y + 140, s, C_DIM, FONT_SMALL);
+    gfx_text(12, y + 164, "SLOTS LOAD AT THE NEXT BAR WHILE PLAYING", C_DIM, FONT_SMALL);
 }
 
 static void draw_fx_overlay(void)

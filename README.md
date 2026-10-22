@@ -15,7 +15,7 @@ Every break channel has its own pitch, a filter, a **bit depth from 1 to 24 bits
 reduction and a **compressor**. On the bus are a glue compressor, drive, a reverb, a
 tempo-synced L2 filter sweep, and punch-in repeat, reverse and tape-stop effects. Eight
 pattern slots switch on the bar line, and the unit syncs tempo over Wi-Fi with HI5 and
-Jaffedrone.
+Jaffedrone, or leads other gear from a mono + clock-pulse output.
 
 ## Install
 
@@ -96,7 +96,8 @@ The pages are PATTERN, CHOP, BASS, MIX and SONG. The footer shows each page's ke
 - **MIX**: a column per channel (LEVEL, PAN, SEND to the reverb) and the master (LEVEL, GLUE
   compressor, DRIVE, VERB time, TONE, and the L2 sweep time). A mutes, B solos.
 - **SONG**: pattern slots A-H. A loads a slot (at the next bar while playing), X saves the
-  pattern into it, R2+Y clears it. Below them are the tempo and the Wi-Fi sync mode.
+  pattern into it, R2+Y clears it. Below them are the tempo, the Wi-Fi sync mode and the
+  output row (OUTPUT, CLOCK ON, PPQN, PULSE): left / right picks a setting, X / Y changes it.
 
 ## Wi-Fi sync
 
@@ -104,6 +105,17 @@ Columbia Street speaks HI5S, the sync protocol of HI5 and Jaffedrone. Units on t
 share tempo, bar phase and transport over UDP broadcast on port 5150. Set the mode on the SONG
 page: OFF, AUTO, LEAD or FOLLOW. A unit set to LEAD wins; otherwise the lowest id leads.
 OnionOS Wi-Fi must be on.
+
+## Clock out (mono + clock)
+
+As on HI5, the SONG page's **OUTPUT** switches between STEREO and **MONO+CLK**: the sound in mono
+on one side of the headphone jack and clock pulses on the other, for a Pocket Operator, Volca or
+other gear with a sync input (split it with a stereo-to-two-mono cable). **CLOCK ON** picks the
+side (RIGHT by default), **PPQN** the pulses per quarter note (1, 2, 4, 8, 16, 24 or 32: 2 for
+Pocket Operators and Volcas, the default; 24 for DIN sync) and **PULSE** the width (1-20 ms, 5 by
+default). The pulses run only while the sequencer plays and follow tap tempo and Wi-Fi sync. In
+mono + clock every channel plays from the centre: the PANs read C on the MIX page and come back
+with STEREO. Songs saved by v0.1 load in STEREO.
 
 ## Building
 

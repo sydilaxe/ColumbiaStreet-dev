@@ -359,6 +359,78 @@ int main(int argc, char **argv)
                song.slot_used[3]);
     }
 
+    /* ---- a v0.1 save (without the output settings) still loads, in stereo */
+    {
+        song_default();
+        song.bpm = 151.f;
+        song.out_mode = OUT_MONO_CLOCK;
+        song_save(path);
+        FILE *f = fopen(path, "rb");
+        static unsigned char buf[sizeof(Song) + 4096];
+        size_t got = fread(buf, 1, sizeof buf, f);
+        fclose(f);
+        uint32_t v1 = (uint32_t)offsetof(Song, out_mode);
+        memcpy(buf + 4, &v1, 4);
+        memmove(buf + v1, buf + sizeof(Song), got - sizeof(Song)); /* drop the new fields */
+        char p1[600];
+        snprintf(p1, sizeof p1, "%s/v01.sav", out);
+        f = fopen(p1, "wb");
+        fwrite(buf, 1, got - (sizeof(Song) - v1), f);
+        fclose(f);
+        song_default();
+        int ok = song_load(p1);
+        printf("save compat v0.1: %d, bpm %.0f, output %d, ppqn %d, pulse %d\n", ok, song.bpm, song.out_mode,
+               clk_ppqn_value(song.clk_ppqn), song.clk_width);
+    }
+
+    /* ---- mono + clock: the pulses' count, spacing and width on the clock
+     * side, nothing but pulses there, and the sound on the other side */
+    {
+        int16_t *pc = malloc(sizeof(int16_t) * 2 * 48000 * 4);
+        static const int idx[4] = {1, 5, 6, 1}; /* 2, 24, 32 PPQN; the last on the left */
+        for (int k = 0; k < 4; k++) {
+            song_default();
+            song.bpm = 120.f;
+            song.pan[0] = -100, song.pan[1] = 100;
+            song.out_mode = OUT_MONO_CLOCK;
+            song.clk_ppqn = idx[k];
+            song.clk_side = k == 3;
+            engine_set_playing(0);
+            engine_render(pc, 4800);
+            engine_set_playing(1);
+            engine_render(pc, 48000 * 4);
+            int cs = k == 3 ? 0 : 1, edges = 0, prev = 0, width = 0, last = -1, other = 0;
+            double gaps = 0;
+            float apk = 0.f;
+            for (int i = 0; i < 48000 * 4; i++) {
+                int c = pc[2 * i + cs], hi = c > 16000;
+                other += c != 0 && c != 31128;
+                if (hi && !prev) {
+                    if (last >= 0)
+                        gaps += i - last;
+                    last = i, edges++;
+                }
+                if (hi && edges == 1)
+                    width++;
+                prev = hi;
+                if (abs(pc[2 * i + 1 - cs]) > apk)
+                    apk = (float)abs(pc[2 * i + 1 - cs]);
+            }
+            printf("clock out: %d PPQN at 120 BPM on the %s -> %d pulses in 4 s, mean gap %.2f ms, width %.2f ms, "
+                   "other values %d, sound peak %.2f\n",
+                   clk_ppqn_value(idx[k]), cs ? "right" : "left", edges, gaps / (edges - 1) * 1000.0 / 48000,
+                   width * 1000.0 / 48000, other, apk / 32768.f);
+        }
+        engine_set_playing(0);
+        engine_render(pc, 24000);
+        int any = 0;
+        for (int i = 0; i < 24000; i++)
+            any += pc[2 * i] > 16000; /* the last pass had the clock on the left */
+        printf("clock out stopped: pulses %d (want 0)\n", any);
+        free(pc);
+        song_default();
+    }
+
     /* ---- every bass voice sounds */
     {
         song_default();
