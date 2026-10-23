@@ -3,6 +3,13 @@ Columbia Street test build for the Miyoo Mini Plus (OnionOS).
 **Install:** unzip `ColumbiaStreet-miyoo.zip` at the root of the SD card (it contains
 `App/ColumbiaStreet/`), then open **Apps → Columbia Street**. Press MENU to quit.
 
+**New in 0.2.0**
+- **Mono + clock out**, as on HI5: on SONG, set **OUTPUT** to **MONO+CLK** and the sound plays in
+  mono on one side of the headphone jack, with clock pulses on the other to lead a Pocket Operator,
+  Volca or other gear. **CLOCK ON** picks the side, **PPQN** the pulses per quarter note (2 for
+  PO/Volca, 24 for DIN) and **PULSE** the width. Every pan moves to the centre while it is on.
+- Songs from 0.1.0 still load (in STEREO).
+
 **New in 0.1.0**
 - Four break channels playing slices of sampled breaks (the Amen, four more breaks, the Amen
   pre-chopped and a jungle hit kit) and a bass channel (SUB, REESE, 808, GROWL or 20 jungle bass

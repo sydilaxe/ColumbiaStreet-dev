@@ -8,6 +8,8 @@
 #include "breaks.h"
 
 #define SONG_MAGIC 0x31545343u /* "CST1" */
+/* a v0.1 save: the same song without the output settings at the end */
+#define SONG_SIZE_V1 offsetof(Song, out_mode)
 
 Song song;
 Live live = {.fx = -1, .queued_slot = -1, .cur_slot = -1};
@@ -848,6 +850,9 @@ void engine_audition(int v)
     live.trig_count[v]++;
 }
 
+static const int ppqn_values[NPPQN] = {1, 2, 4, 8, 16, 24, 32};
+int clk_ppqn_value(int i) { return ppqn_values[i < 0 ? 0 : i >= NPPQN ? NPPQN - 1 : i]; }
+
 double engine_position(void)
 {
     if (!live.playing)
@@ -893,6 +898,11 @@ void engine_render(int16_t *out, int frames)
     int any_solo = 0;
     for (int v = 0; v < NV; v++)
         any_solo |= song.solo[v];
+    /* mono + clock: the sound in mono on one side, clock pulses on the other */
+    int clk_out = song.out_mode == OUT_MONO_CLOCK, clk_left = song.clk_side;
+    int clk_ppqn = clk_ppqn_value(song.clk_ppqn);
+    double clk_spp = sps * 4.0 / clk_ppqn; /* samples per pulse */
+    double clk_w = fmin(song.clk_width * 0.001 * sr, clk_spp * 0.5);
     float gain[NV], gL[NV], gR[NV];
     for (int v = 0; v < NV; v++) {
         float g = song.vol[v] / 100.f;
@@ -900,7 +910,7 @@ void engine_render(int16_t *out, int frames)
         if (song.pat.mute[v] || (any_solo && !song.solo[v]))
             g = 0.f;
         gain[v] = g;
-        float pan = song.pan[v] / 100.f;
+        float pan = clk_out ? 0.f : song.pan[v] / 100.f; /* mono + clock: from the centre */
         gL[v] = g * sqrtf(0.5f * (1.f - pan));
         gR[v] = g * sqrtf(0.5f * (1.f + pan));
     }
@@ -1081,6 +1091,17 @@ void engine_render(int16_t *out, int frames)
         float m = fmaxf(fabsf(L), fabsf(R));
         if (m > meter_acc[NV])
             meter_acc[NV] = m;
+        if (clk_out) {
+            float mono = 0.5f * (L + R), c = 0.f;
+            if (live.playing) {
+                /* the position in 16ths at the start of this sample */
+                double pos = live.step + 1.0 - (step_phase + sync_rate) / sps, ph = fmod(pos * clk_ppqn / 4.0, 1.0);
+                if ((ph < 0.0 ? ph + 1.0 : ph) * clk_spp < clk_w)
+                    c = 0.95f;
+            }
+            L = clk_left ? c : mono;
+            R = clk_left ? mono : c;
+        }
         int li = (int)(L * 32767.f), ri = (int)(R * 32767.f);
         out[2 * n] = (int16_t)(li > 32767 ? 32767 : li < -32768 ? -32768 : li);
         out[2 * n + 1] = (int16_t)(ri > 32767 ? 32767 : ri < -32768 ? -32768 : ri);
@@ -1279,6 +1300,10 @@ void song_default(void)
     song.verb_tone = 40;
     song.sweep_rate = 2;
     song.sync_mode = SYNC_AUTO;
+    song.out_mode = OUT_STEREO;
+    song.clk_side = 0;
+    song.clk_ppqn = 1; /* 2 PPQN: Pocket Operators, Volcas */
+    song.clk_width = 5;
 
     Pattern *p = &song.pat;
     defaults_for(p);
@@ -1429,11 +1454,17 @@ int song_load(const char *path)
         return 0;
     static Song s;
     Names nm[1 + NSLOT];
-    int ok = fread(&s, sizeof s, 1, f) == 1 && s.magic == SONG_MAGIC && s.size == sizeof s &&
-             fread(nm, sizeof nm, 1, f) == 1;
+    uint32_t hdr[2] = {0, 0};
+    int ok = fread(hdr, sizeof hdr, 1, f) == 1 && hdr[0] == SONG_MAGIC && (hdr[1] == sizeof s || hdr[1] == SONG_SIZE_V1);
+    memset(&s, 0, sizeof s);
+    ok = ok && fseek(f, 0, SEEK_SET) == 0 && fread(&s, hdr[1], 1, f) == 1 && fread(nm, sizeof nm, 1, f) == 1;
     fclose(f);
     if (!ok)
         return 0;
+    if (hdr[1] == SONG_SIZE_V1) { /* from v0.1: stereo out, the clock as its defaults */
+        s.size = sizeof s;
+        s.out_mode = OUT_STEREO, s.clk_side = 0, s.clk_ppqn = 1, s.clk_width = 5;
+    }
     if (!(s.bpm >= 40.f && s.bpm <= 250.f))
         s.bpm = 170.f;
     resolve(&s.pat, &nm[0]);
@@ -1453,6 +1484,10 @@ int song_load(const char *path)
     song.verb_tone = clampi(song.verb_tone, 0, 100);
     song.sweep_rate = clampi(song.sweep_rate, 0, 3);
     song.sync_mode = clampi(song.sync_mode, 0, NSYNCMODE - 1);
+    song.out_mode = clampi(song.out_mode, 0, 1);
+    song.clk_side = clampi(song.clk_side, 0, 1);
+    song.clk_ppqn = clampi(song.clk_ppqn, 0, NPPQN - 1);
+    song.clk_width = clampi(song.clk_width, 1, 20);
     return 1;
 }
 

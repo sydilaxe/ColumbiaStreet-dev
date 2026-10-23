@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define CS_VERSION "0.1.0"
+#define CS_VERSION "0.2.0"
 
 #define NV 5    /* channels */
 #define NBRK 4  /* break channels 0..3; channel 4 is the bass */
@@ -42,6 +42,12 @@ enum { WAVE_SUB, WAVE_REESE, WAVE_808, WAVE_GROWL, NWAVE_SYNTH }; /* then the ba
 enum { BALT_OCTUP, BALT_FIFTH, BALT_OCTDN, BALT_SLIDE, BALT_REST, NBALT };
 
 enum { SYNC_OFF, SYNC_AUTO, SYNC_LEAD, SYNC_FOLLOW, NSYNCMODE };
+/* the output, as on HI5: stereo, or the sound in mono on one side and clock
+ * pulses on the other (clk_side 0 = clock on the right), clk_ppqn pulses per
+ * quarter note (an index into 1, 2, 4, 8, 16, 24, 32), clk_width ms wide.
+ * In mono + clock every channel plays from the centre (the pans are kept). */
+enum { OUT_STEREO, OUT_MONO_CLOCK };
+#define NPPQN 7
 /* punch-in effects on R2 + up / right / left / down */
 enum { FX_REPEAT8, FX_REPEAT16, FX_REVERSE, FX_TAPESTOP };
 
@@ -72,6 +78,8 @@ typedef struct {
     int sync_mode;
     Pattern slot[NSLOT];
     uint8_t slot_used[NSLOT];
+    /* v0.2: new fields go at the end, so an older save still loads */
+    int out_mode, clk_side, clk_ppqn, clk_width;
 } Song;
 
 /* Shared between UI and audio thread. The UI writes these only while
@@ -106,6 +114,7 @@ const char *riff_name(int i);
 int riff_len(int i);
 int riff_note(int i, int k);
 const char *sweep_rate_name(int i);
+int clk_ppqn_value(int i); /* clk_ppqn index -> pulses per quarter note */
 int nsweep(void);
 
 void engine_init(int sample_rate);
