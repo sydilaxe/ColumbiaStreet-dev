@@ -1,9 +1,12 @@
 build/
 third_party/onion-lib/
+third_party/mbedtls/
 dist/ColumbiaStreet/columbia
 dist/ColumbiaStreet/columbia.sav
 dist/ColumbiaStreet/columbia.sav.tmp
 dist/ColumbiaStreet/log.txt
+dist/ColumbiaStreet/VERSION
+dist/ColumbiaStreet/LICENSE-mbedtls.txt
 # samples are fetched by tools/fetch_samples.sh, never committed
 dist/ColumbiaStreet/breaks/*
 !dist/ColumbiaStreet/breaks/README.txt

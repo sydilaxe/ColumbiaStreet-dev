@@ -7,6 +7,8 @@
 #   make install SD=/run/media/$USER/<card>   copy the app onto a mounted SD card
 #   make package CROSS=<prefix>   build with the OnionOS gcc toolchain (no zig) and zip it as
 #                 build/ColumbiaStreet-miyoo.zip, laid out to unzip at the root of the SD card (CI does this)
+#   make update-test   install a fake release over a test app folder, the way the app updates itself
+#   make version  print CS_VERSION (src/engine.h); releases are tagged v<version>
 
 ZIG    ?= $(HOME)/.local/opt/zig-aarch64-linux-0.14.1/zig
 TARGET := arm-linux-gnueabihf.2.28
@@ -14,12 +16,18 @@ SDL_INC := third_party/SDL-1.2.15-headers
 SDL_LIB := third_party/onion-lib/libSDL-1.2.so.0
 
 SRC    := src/engine.c src/breaks.c src/ui.c src/gfx.c src/sync.c
-HDR    := src/engine.h src/breaks.h src/ui.h src/gfx.h src/sync.h src/font_data.h
+HDR    := src/engine.h src/breaks.h src/ui.h src/gfx.h src/sync.h src/font_data.h src/update.h
+NET    := src/net.c src/update.c # the self-updater, on the Miyoo and in build/cs_update
 CFLAGS := -O2 -std=gnu11 -Wall -Wextra -fno-math-errno
 APP    := dist/ColumbiaStreet
 SAMPLES := $(APP)/breaks/AMEN_153bpm.wav
+VERSION := $(shell sed -n 's/^\#define CS_VERSION "\([^"]*\)".*/\1/p' src/engine.h)
 
-all: $(APP)/columbia $(APP)/icon.png samples
+all: $(APP)/columbia $(APP)/icon.png $(APP)/VERSION $(APP)/LICENSE-mbedtls.txt samples
+
+# read by install.sh to tell whether the Miyoo is up to date
+$(APP)/VERSION: src/engine.h
+	echo $(VERSION) > $@
 
 samples: $(SAMPLES)
 $(SAMPLES): tools/fetch_samples.sh
@@ -38,9 +46,35 @@ $(SDL_LIB):
 	mkdir -p $(dir $@)
 	curl -sSL -o $@ $(SDL_URL) || wget -qO $@ $(SDL_URL) || (rm -f $@; false)
 
-$(APP)/columbia: $(SRC) src/main_sdl.c $(HDR) $(SDL_LIB)
-	$(ZIG) cc -target $(TARGET) -mcpu=cortex_a7 $(CFLAGS) -I$(SDL_INC) -o $@ \
-		$(SRC) src/main_sdl.c $(SDL_LIB) -lm -lpthread -Wl,--allow-shlib-undefined -s
+# Mbed TLS (Apache-2.0) for the updater's HTTPS, from a pinned release, not committed; each
+# toolchain builds its own libmbedtls.a from it with tools/mbedtls.mk
+MBED_VER := 3.6.7
+MBED_SHA := a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
+MBED_DIR := third_party/mbedtls
+MBED_URL := https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$(MBED_VER)/mbedtls-$(MBED_VER).tar.bz2
+MBED_SRC := $(MBED_DIR)/.v$(MBED_VER)
+$(MBED_SRC):
+	rm -rf $(MBED_DIR) && mkdir -p $(MBED_DIR)
+	curl -sSL -o $(MBED_DIR).tar.bz2 $(MBED_URL) || wget -qO $(MBED_DIR).tar.bz2 $(MBED_URL)
+	echo "$(MBED_SHA)  $(MBED_DIR).tar.bz2" | sha256sum -c --quiet || (rm -f $(MBED_DIR).tar.bz2; false)
+	tar -xjf $(MBED_DIR).tar.bz2 -C $(MBED_DIR) --strip-components=1
+	rm $(MBED_DIR).tar.bz2
+	touch $@
+
+# the binary carries Mbed TLS, so the app folder carries its licence
+$(APP)/LICENSE-mbedtls.txt: $(MBED_SRC)
+	cp $(MBED_DIR)/LICENSE $@
+
+build/zig/libmbedtls.a: $(MBED_SRC)
+	$(MAKE) -f tools/mbedtls.mk OUT=build/zig MBED_DIR=$(MBED_DIR) \
+		CC="$(ZIG) cc -target $(TARGET) -mcpu=cortex_a7" AR="$(ZIG) ar" MBED_CFLAGS=-O2
+
+build/host/libmbedtls.a: $(MBED_SRC)
+	$(MAKE) -f tools/mbedtls.mk OUT=build/host MBED_DIR=$(MBED_DIR) CC=cc AR=ar MBED_CFLAGS=-O2
+
+$(APP)/columbia: $(SRC) $(NET) src/main_sdl.c $(HDR) src/net.h $(SDL_LIB) build/zig/libmbedtls.a
+	$(ZIG) cc -target $(TARGET) -mcpu=cortex_a7 $(CFLAGS) -I$(SDL_INC) -I$(MBED_DIR)/include -o $@ \
+		$(SRC) $(NET) src/main_sdl.c build/zig/libmbedtls.a $(SDL_LIB) -lm -lpthread -Wl,--allow-shlib-undefined -s
 
 build/cs_test: $(SRC) src/main_test.c $(HDR)
 	@mkdir -p build
@@ -50,6 +84,15 @@ test: build/cs_test $(SAMPLES)
 	@mkdir -p build/test
 	build/cs_test build/test $(APP)
 	cd build/test && for f in *.ppm; do convert $$f $${f%.ppm}.png && rm $$f; done
+
+build/cs_update: $(NET) src/main_update.c src/engine.h src/net.h src/update.h build/host/libmbedtls.a
+	cc $(CFLAGS) -I$(MBED_DIR)/include -o $@ $(NET) src/main_update.c build/host/libmbedtls.a -lpthread
+
+update-test: build/cs_update
+	sh tools/update_test.sh
+
+version:
+	@echo $(VERSION)
 
 zip: all
 	@mkdir -p build
@@ -64,18 +107,23 @@ install: all
 	sync
 
 clean:
-	rm -rf build $(APP)/columbia
+	rm -rf build $(APP)/columbia $(APP)/VERSION $(APP)/LICENSE-mbedtls.txt
 
-.PHONY: all samples test zip install clean
+.PHONY: all samples test update-test version zip install clean
 
 # the OnionOS toolchain's gcc instead of zig, e.g. in the aemiii91/miyoomini-toolchain container:
 #   make package CROSS=/opt/miyoomini-toolchain/usr/bin/arm-linux-gnueabihf-
 CROSS ?= arm-linux-gnueabihf-
-miyoo: $(SRC) src/main_sdl.c $(HDR) $(SDL_LIB)
-	$(CROSS)gcc -marm -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard $(CFLAGS) -I$(SDL_INC) -o $(APP)/columbia \
-		$(SRC) src/main_sdl.c $(SDL_LIB) -lm -lpthread -Wl,--allow-shlib-undefined -s
+ARM := -marm -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard
+build/gcc/libmbedtls.a: $(MBED_SRC)
+	$(MAKE) -f tools/mbedtls.mk OUT=build/gcc MBED_DIR=$(MBED_DIR) CC=$(CROSS)gcc AR=$(CROSS)ar \
+		MBED_CFLAGS="-O2 $(ARM)"
 
-package: miyoo samples
+miyoo: $(SRC) $(NET) src/main_sdl.c $(HDR) src/net.h $(SDL_LIB) build/gcc/libmbedtls.a
+	$(CROSS)gcc $(ARM) $(CFLAGS) -I$(SDL_INC) -I$(MBED_DIR)/include -o $(APP)/columbia \
+		$(SRC) $(NET) src/main_sdl.c build/gcc/libmbedtls.a $(SDL_LIB) -lm -lpthread -Wl,--allow-shlib-undefined -s
+
+package: miyoo samples $(APP)/VERSION $(APP)/LICENSE-mbedtls.txt
 	rm -rf build/sd build/ColumbiaStreet-miyoo.zip
 	mkdir -p build/sd/App
 	cp -r $(APP) build/sd/App/

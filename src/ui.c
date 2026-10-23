@@ -1,5 +1,6 @@
 #include "ui.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -10,6 +11,7 @@
 #include "engine.h"
 #include "gfx.h"
 #include "sync.h"
+#include "update.h"
 
 #define C_BG 0x0b0c10
 #define C_PANEL 0x15171e
@@ -50,6 +52,9 @@ static float meter_disp[NV + 1], flash[NV];
 static uint32_t seen_trig[NV];
 static Pattern undo_pat;
 static int have_undo;
+static const UpdateStatus *upd;
+static void (*upd_install)(void);
+static int upd_open, upd_asked; /* the update prompt is up; it has been shown this session */
 
 /* mix page rows: voices have LEVEL, PAN, SEND; the master column has more */
 enum { MX_LEVEL, MX_PAN, MX_SEND, NMXV };
@@ -77,6 +82,12 @@ void ui_init(void)
 {
     for (int v = 0; v < NV; v++)
         seen_trig[v] = live.trig_count[v];
+}
+
+void ui_set_update(const UpdateStatus *status, void (*install)(void))
+{
+    upd = status;
+    upd_install = install;
 }
 
 int ui_quit_requested(void) { return quit; }
@@ -411,6 +422,21 @@ static void action(int b, int repeats)
     }
 }
 
+/* the update prompt takes the buttons while it is up; the music keeps playing */
+static void update_action(int b)
+{
+    int st = upd->state;
+    if (st == UP_INSTALLING || st == UP_INSTALLED)
+        return;
+    if (b == BTN_A && (st == UP_AVAILABLE || st == UP_FAILED))
+        upd_install();
+    else if (b == BTN_B || b == BTN_MENU) {
+        upd_open = 0;
+        if (st == UP_AVAILABLE)
+            say("V%s IS OFFERED AGAIN NEXT TIME", upd->latest);
+    }
+}
+
 static int repeatable(int b)
 {
     if (is_dpad(b))
@@ -431,9 +457,15 @@ void ui_button(int b, int down)
     ui_lock();
     if (b == BTN_L2)
         live.filter_held = down;
-    if (down && is_dpad(b))
+    if (down && is_dpad(b) && !upd_open)
         note_dpad_press(b);
-    if (b == BTN_B && page == PAGE_PATTERN) {
+    if (upd_open) {
+        if (down)
+            update_action(b);
+        if (b == BTN_B)
+            b_used = 1; /* so letting go of B doesn't roll a rhythm on PATTERN */
+    }
+    else if (b == BTN_B && page == PAGE_PATTERN) {
         if (down)
             b_used = 0;
         else if (!held[BTN_R2]) {
@@ -452,8 +484,10 @@ void ui_tick(int ms)
     now_ms += ms;
     if (toast_ms > 0)
         toast_ms -= ms;
+    if (upd && upd->state == UP_AVAILABLE && !upd_asked)
+        upd_asked = upd_open = 1;
     for (int b = 0; b < BTN_COUNT; b++) {
-        if (!held[b] || !repeatable(b))
+        if (!held[b] || !repeatable(b) || upd_open)
             continue;
         hold_ms[b] += ms;
         if (hold_ms[b] < 300)
@@ -931,6 +965,45 @@ static void draw_fx_overlay(void)
     }
 }
 
+static void draw_update(void)
+{
+    if (!upd_open)
+        return;
+    int st = upd->state, w = 500, h = 230, x = (SCREEN_W - w) / 2, y = 120;
+    char s[200];
+    gfx_fill_a(0, 0, SCREEN_W, SCREEN_H, 0x000000, 150);
+    gfx_fill(x, y, w, h, C_PANEL);
+    gfx_rect(x, y, w, h, 2, C_ACCENT);
+    snprintf(s, sizeof s, "V%s IS OUT", upd->latest);
+    text_c(SCREEN_W / 2, y + 16, s, C_ACCENT, FONT_LARGE);
+    text_c(SCREEN_W / 2, y + 58, "THIS IS V" CS_VERSION, C_DIM, FONT_SMALL);
+    if (st == UP_INSTALLING || st == UP_INSTALLED) {
+        int bw = 360, bx = (SCREEN_W - bw) / 2, p = st == UP_INSTALLED ? 100 : clampi(upd->progress, 0, 100);
+        gfx_rect(bx, y + 104, bw, 16, 1, C_LINE);
+        gfx_fill(bx + 2, y + 106, (bw - 4) * p / 100, 12, C_ACCENT);
+        if (st == UP_INSTALLED)
+            snprintf(s, sizeof s, "UPDATED - RESTARTING...");
+        else
+            snprintf(s, sizeof s, "DOWNLOADING... %d%%", p);
+        text_c(SCREEN_W / 2, y + 136, s, C_TEXT, FONT_SMALL);
+        return;
+    }
+    if (st == UP_FAILED) {
+        int n = snprintf(s, sizeof s, "%s", upd->err);
+        for (int i = 0; s[i]; i++)
+            s[i] = (char)toupper((unsigned char)s[i]);
+        while (n > 3 && gfx_text_w(s, FONT_SMALL) > w - 24) /* a long path: cut it short */
+            memcpy(s + (n -= 4), "...", 4);
+        text_c(SCREEN_W / 2, y + 100, s, C_MUTE, FONT_SMALL);
+        text_c(SCREEN_W / 2, y + 126, "NOTHING WAS CHANGED", C_DIM, FONT_SMALL);
+        text_c(SCREEN_W / 2, y + h - 40, "A:TRY AGAIN  B:CLOSE", C_TEXT, FONT_SMALL);
+        return;
+    }
+    text_c(SCREEN_W / 2, y + 100, "DOWNLOAD IT AND RESTART?", C_TEXT, FONT_SMALL);
+    text_c(SCREEN_W / 2, y + 126, "YOUR SONG AND BREAKS STAY AS THEY ARE", C_DIM, FONT_SMALL);
+    text_c(SCREEN_W / 2, y + h - 40, "A:UPDATE AND RESTART  B:NOT NOW", C_TEXT, FONT_SMALL);
+}
+
 void ui_draw(uint32_t *fb)
 {
     gfx_target(fb);
@@ -945,6 +1018,7 @@ void ui_draw(uint32_t *fb)
     }
     draw_footer();
     draw_fx_overlay();
+    draw_update();
     draw_toast();
 }
 

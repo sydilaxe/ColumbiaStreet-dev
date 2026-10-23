@@ -13,6 +13,11 @@ export LD_LIBRARY_PATH="/mnt/SDCARD/.tmp_update/lib/parasyte:/lib:/config/lib:/m
 # Optional settings, before ./columbia (for example CS_BUFFER=2048 ./columbia):
 #   CS_BUFFER=2048  bigger audio buffers if you hear crackle (1024 by default)
 #   CS_RATE=44100   a lower sample rate: a little less work
-./columbia > log.txt 2>&1
+#   CS_UPDATE=0     don't check GitHub for a new version
+# exit status 75: the app has just updated itself, so start the new version
+while :; do
+    ./columbia > log.txt 2>&1
+    [ $? -eq 75 ] || break
+done
 
 rm -f /tmp/stay_awake

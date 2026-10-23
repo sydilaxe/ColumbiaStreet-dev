@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define CS_VERSION "0.2.0"
+#define CS_VERSION "0.3.0" /* the release tag is v<this>: the app offers any newer release (CI checks the tag) */
 
 #define NV 5    /* channels */
 #define NBRK 4  /* break channels 0..3; channel 4 is the bass */
