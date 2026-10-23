@@ -19,6 +19,29 @@ Jaffedrone, or leads other gear from a mono + clock-pulse output.
 
 ## Install
 
+Turn on SSH on the Miyoo (Apps > Tweaks > Network > SSH). Then run this on a computer on the
+same network:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sydilaxe/ColumbiaStreet-dev/main/install.sh | bash
+```
+
+The script finds the Miyoo by scanning the local /24 for Onion's SSH server. It checks the
+installed version against the latest [release](../../releases), and if the release is newer it
+copies it to `SD:/App/ColumbiaStreet`. Your song (`columbia.sav`) and any breaks or basses you
+added are kept. Run it again any time to update. Log in with Onion's default `onion` / `onion`.
+The address that worked is saved in `~/.config/columbiastreet/host`. To skip the scan, set
+`CS_HOST`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sydilaxe/ColumbiaStreet-dev/main/install.sh | CS_HOST=192.168.1.28 bash
+```
+
+`CS_USER` changes the SSH user. `CS_FORCE=1` reinstalls even when the version matches. Quit
+Columbia Street on the Miyoo before updating.
+
+Without SSH, install by hand:
+
 1. Build it (see below), or download `ColumbiaStreet-miyoo.zip` from the latest release, or
    from the artifacts of the latest run on the Actions tab.
 2. Unzip at the root of the OnionOS SD card, so the app lands in `SD:/App/ColumbiaStreet`. With
@@ -26,6 +49,17 @@ Jaffedrone, or leads other gear from a mono + clock-pulse output.
 3. Launch **Columbia Street** from Apps. Press MENU to quit.
 
 The state autosaves to `columbia.sav` in the app folder.
+
+### Updating from the Miyoo
+
+From v0.3.0 on, Columbia Street keeps itself up to date. Five seconds after it starts, it asks
+GitHub for the latest release, retrying each minute (up to five times) while Wi-Fi comes up.
+When there's a newer one it asks **A: update and restart / B: not now**. A downloads the
+release's `ColumbiaStreet-miyoo.zip` (about 5 MB) while the music keeps playing. It checks every
+file, swaps in the ones that changed and starts the new version. Your song and your own breaks
+stay as they are. If anything goes wrong on the way, nothing is changed. B asks again next time
+you open the app. `CS_UPDATE=0` in `launch.sh` turns the check off. An update replaces
+`launch.sh`, so set any of its switches again afterwards.
 
 ## The breaks
 
@@ -68,6 +102,9 @@ These work on every page:
 | R2 + left / down | Reverse / tape stop |
 | R2 + X | Tap tempo (taps under 100 BPM count double) |
 | MENU | Quit |
+
+When a new version is out, a prompt covers the page: A updates and restarts, B (or MENU) says
+not now. The sequencer keeps playing, and the rest of the buttons wait until it closes.
 
 The pages are PATTERN, CHOP, BASS, MIX and SONG. The footer shows each page's keys.
 
@@ -121,12 +158,13 @@ with STEREO. Songs saved by v0.1 load in STEREO.
 
 You need [zig](https://ziglang.org/) 0.14 for the cross-compile; the Makefile looks in
 `~/.local/opt/zig-aarch64-linux-0.14.1/zig`, or set `ZIG=...` (`pip install ziglang==0.14.1`
-also provides it). You also need `curl`, `python3` (with Pillow for the icon), and for `make
+also provides it). You also need `curl`, `bzip2`, `python3` (with Pillow for the icon), and for `make
 test` a host C compiler and ImageMagick.
 
 ```sh
 make              # cross-compile dist/ColumbiaStreet/columbia and fetch the samples
 make test         # host harness: screenshots, audio and engine checks into build/test
+make update-test  # the self-update end to end, against tools/fake_github.py
 make zip          # package dist/ColumbiaStreet as build/ColumbiaStreet.zip
 make install SD=/path/to/mounted/sdcard
 make package CROSS=/opt/miyoomini-toolchain/usr/bin/arm-linux-gnueabihf-   # OnionOS gcc, as CI does
@@ -135,13 +173,24 @@ make package CROSS=/opt/miyoomini-toolchain/usr/bin/arm-linux-gnueabihf-   # Oni
 ### Releases
 
 CI (`.github/workflows/build.yml`) builds the Miyoo package and runs the tests on every push.
-To publish a release with `ColumbiaStreet-miyoo.zip` attached, push a version tag (`git tag
-v0.1.0 && git push origin v0.1.0`), or run the workflow from the Actions tab with a tag in
-`release_tag`. Releases are marked as test builds and use `.github/release-notes.md` as their
-notes; running again for the same tag replaces the zip.
+To publish a release, first set `CS_VERSION` in `src/engine.h` to the new version. The app
+compares it with the release tag to decide whether it's out of date, so the release job
+refuses a tag that doesn't match (`make version` prints it). Then push the tag (`git tag v0.3.0
+&& git push origin v0.3.0`), or run the workflow from the Actions tab with the tag in
+`release_tag`. Releases are full releases marked Latest, since the updater and `install.sh`
+read GitHub's latest release, and that skips pre-releases. They have `ColumbiaStreet-miyoo.zip`
+attached and `.github/release-notes.md` as their notes. Running again for the same tag replaces
+the zip.
+
+`build/cs_update APP_DIR [--force]` (built by `make update-test`) checks for a newer release
+and installs it into `APP_DIR`, the way the app does. Point `CS_UPDATE_API` at
+`tools/fake_github.py` (`http://127.0.0.1:8766/latest.json`) to test an update without
+publishing one.
 
 The build links against Onion's own MI_AO/MI_GFX-backed SDL 1.2, which `make` downloads into
-`third_party/onion-lib/` (not committed).
+`third_party/onion-lib/` (not committed). The updater's HTTPS comes from
+[Mbed TLS](https://github.com/Mbed-TLS/mbedtls) 3.6.7, which `make` downloads (pinned by its
+SHA-256) into `third_party/mbedtls/` (not committed) and links in statically.
 
 ### Layout
 
@@ -152,13 +201,20 @@ The build links against Onion's own MI_AO/MI_GFX-backed SDL 1.2, which `make` do
 | `src/ui.c` | Pages, input, drawing |
 | `src/gfx.c`, `src/font_data.h` | Framebuffer drawing and the font |
 | `src/sync.c` | Wi-Fi sync |
+| `src/update.c`, `src/net.c` | Self-update: GitHub's latest release, the download and unzip; HTTPS |
 | `src/main_sdl.c` | Device entry point (SDL audio + video) |
 | `src/main_test.c` | Host test harness |
+| `src/main_update.c` | Host updater (`build/cs_update`) for tests |
+| `install.sh` | The one-line installer, over SSH |
 | `tools/fetch_samples.sh` | Fetches the curated breaks and basses |
+| `tools/fake_github.py`, `tools/update_test.sh` | A local GitHub stand-in and the update test |
+| `tools/mbedtls.mk` | Builds Mbed TLS for each toolchain |
 | `dist/ColumbiaStreet/` | The app folder as installed on the card |
 
 ## License
 
 MIT. See [LICENSE](LICENSE). The SDL 1.2 headers in `third_party/` and Onion's SDL library
 are under the LGPL; see `third_party/SDL-1.2.15-headers/COPYING`. The font is Noto Sans Mono
-(SIL OFL 1.1). The samples are not part of this repo and are not covered by its licence.
+(SIL OFL 1.1). Mbed TLS is under Apache-2.0 (or GPL-2.0-or-later); the app folder carries its
+licence as `LICENSE-mbedtls.txt`. `dist/ColumbiaStreet/cacert.pem` is curl's extract of
+Mozilla's CA certificates (MPL 2.0). The samples are not part of this repo and are not covered by its licence.

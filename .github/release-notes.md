@@ -1,7 +1,23 @@
-Columbia Street test build for the Miyoo Mini Plus (OnionOS).
+Columbia Street, a five-channel jungle sequencer for the Miyoo Mini Plus (OnionOS).
 
-**Install:** unzip `ColumbiaStreet-miyoo.zip` at the root of the SD card (it contains
+**Install**
+
+With SSH on (Onion: Apps → Tweaks → Network → SSH), run this on a computer on the same network:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sydilaxe/ColumbiaStreet-dev/main/install.sh | bash
+```
+
+Or by hand: unzip `ColumbiaStreet-miyoo.zip` at the root of the SD card (it contains
 `App/ColumbiaStreet/`), then open **Apps → Columbia Street**. Press MENU to quit.
+
+**New in 0.3.0**
+- **Updates itself:** a few seconds after it starts, Columbia Street asks GitHub for the latest
+  release and, when there's a newer one, offers to download it and restart (A) or wait (B). The
+  music keeps playing while it downloads; your song and your own breaks are kept, and a failed
+  update changes nothing. `CS_UPDATE=0` in `launch.sh` turns it off. This starts working with
+  the release after 0.3.0.
+- **One-line install** over Wi-Fi with `install.sh` (above), which also updates an installed copy.
 
 **New in 0.2.0**
 - **Mono + clock out**, as on HI5: on SONG, set **OUTPUT** to **MONO+CLK** and the sound plays in

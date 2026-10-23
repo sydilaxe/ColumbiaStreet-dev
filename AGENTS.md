@@ -19,3 +19,8 @@ synthesised.
 When you change a control or a screen, update the README's Controls section and the footer
 hints in `src/ui.c`. When you change the engine, run `make test` and keep its checks passing
 (CI greps for them in `.github/workflows/build.yml`).
+
+The app updates itself from the latest GitHub release (`src/update.c`, HTTPS through Mbed TLS,
+fetched at a pinned release like the samples). Before tagging a release, set `CS_VERSION` in
+`src/engine.h` to match the tag; CI refuses a mismatch. When you change the updater or the
+package layout, run `make update-test`.

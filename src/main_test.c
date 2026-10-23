@@ -15,6 +15,7 @@
 #include "gfx.h"
 #include "sync.h"
 #include "ui.h"
+#include "update.h"
 
 #define RATE 48000
 
@@ -146,6 +147,13 @@ static double corr(const float *a, const float *b, int n)
 }
 
 /* render n frames to a mono float buffer (left channel) */
+static UpdateStatus fake_update; /* the update prompt, as if v9.9.9 were out */
+static void fake_install(void)
+{
+    fake_update.state = UP_INSTALLING;
+    fake_update.progress = 42;
+}
+
 static void render_mono(float *dst, int n)
 {
     static int16_t buf[2048 * 2];
@@ -471,6 +479,37 @@ int main(int argc, char **argv)
         sync_core_init(100);
         sync_handle_packet(pkt, sizeof pkt, 2000);
         printf("sync: bpm=%.1f following=%d\n", song.bpm, sync_status()->have_leader);
+    }
+
+    /* ---- the update prompt: A starts the install; the B that closes it doesn't roll a rhythm */
+    {
+        song_default();
+        ui_set_page(PAGE_PATTERN);
+        snprintf(fake_update.latest, sizeof fake_update.latest, "9.9.9");
+        fake_update.state = UP_AVAILABLE;
+        ui_set_update(&fake_update, fake_install);
+        ui_tick(10);
+        ui_draw(fb);
+        int shown = (fb[120 * SCREEN_W + SCREEN_W / 2] & 0xffffff) == 0xff5a2a; /* the panel's orange border */
+        snprintf(path, sizeof path, "%s/update.ppm", out);
+        write_ppm(path, fb);
+        ui_button(BTN_A, 1);
+        ui_button(BTN_A, 0);
+        ui_draw(fb);
+        snprintf(path, sizeof path, "%s/update_install.ppm", out);
+        write_ppm(path, fb);
+        int started = fake_update.state == UP_INSTALLING;
+        fake_update.state = UP_AVAILABLE;
+        Pattern before = song.pat;
+        ui_button(BTN_B, 1);
+        ui_button(BTN_B, 0);
+        ui_tick(10);
+        ui_draw(fb);
+        int closed = (fb[120 * SCREEN_W + SCREEN_W / 2] & 0xffffff) != 0xff5a2a;
+        int same = !memcmp(&before, &song.pat, sizeof before);
+        printf("update prompt: shown %d, A installs %d, B closes it %d, pattern untouched %d\n", shown, started, closed,
+               same);
+        ui_set_update(NULL, NULL);
     }
     breaks_free();
     return 0;

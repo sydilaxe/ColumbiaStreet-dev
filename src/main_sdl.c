@@ -9,12 +9,15 @@
 #include "breaks.h"
 #include "engine.h"
 #include "gfx.h"
+#include "net.h"
 #include "sync.h"
 #include "ui.h"
+#include "update.h"
 
 #define SAVE_PATH "columbia.sav"
 #define BREAK_DIR "breaks"
 #define BASS_DIR "bass"
+#define CA_BUNDLE "cacert.pem"
 
 static uint64_t now_us(void)
 {
@@ -75,6 +78,27 @@ static void present(void (*draw)(uint32_t *, const char *), const char *msg)
         SDL_UnlockSurface(screen);
     SDL_BlitSurface(screen, NULL, video, NULL);
     SDL_Flip(video);
+}
+
+static void install_update(void) { update_install_start("."); }
+
+/* Ask GitHub for the latest release 5 s after starting (so Wi-Fi is up), then
+ * every minute until it answers, five tries in all. */
+static void update_watch(Uint32 now, Uint32 *next_check, int *tries)
+{
+    static int logged;
+    UpdateStatus *u = update_status();
+    if ((u->state == UP_CURRENT || u->state == UP_AVAILABLE) && !logged) {
+        logged = 1;
+        fprintf(stderr, "update: the latest release is v%s, this is v%s\n", u->latest, CS_VERSION);
+    }
+    if ((u->state == UP_IDLE || u->state == UP_CHECK_FAILED) && *tries < 5 && now >= *next_check) {
+        if (u->state == UP_CHECK_FAILED)
+            fprintf(stderr, "%s\n", u->err);
+        ++*tries;
+        *next_check = now + 60000;
+        update_check_start();
+    }
 }
 
 static void draw_main(uint32_t *fb, const char *msg)
@@ -140,7 +164,13 @@ int main(int argc, char **argv)
 
     ui_init();
     sync_init();
-    Uint32 last = SDL_GetTicks(), last_save = last;
+    int update_auto = getenv("CS_UPDATE") ? atoi(getenv("CS_UPDATE")) != 0 : 1, update_tries = 0;
+    if (update_auto) {
+        net_init(CA_BUNDLE);
+        ui_set_update(update_status(), install_update);
+    }
+    fprintf(stderr, "update check %s\n", update_auto ? "on" : "off");
+    Uint32 last = SDL_GetTicks(), last_save = last, update_next = last + 5000, relaunch_at = 0;
     while (!ui_quit_requested() && !got_signal) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -153,6 +183,14 @@ int main(int argc, char **argv)
         ui_tick((int)(now - last));
         last = now;
         sync_poll(now_us());
+        if (update_auto)
+            update_watch(now, &update_next, &update_tries);
+        if (update_status()->state == UP_INSTALLED && !relaunch_at) {
+            fprintf(stderr, "update: v%s installed, relaunching\n", update_status()->latest);
+            relaunch_at = now + 1200; /* long enough to read "restarting" */
+        }
+        if (relaunch_at && now >= relaunch_at)
+            break;
         present(draw_main, NULL);
 
         if (now - last_save > 15000) {
@@ -171,5 +209,5 @@ int main(int argc, char **argv)
         SDL_CloseAudio();
     SDL_Quit();
     breaks_free();
-    return 0;
+    return update_status()->state == UP_INSTALLED ? RELAUNCH_STATUS : 0; /* launch.sh starts the new version */
 }

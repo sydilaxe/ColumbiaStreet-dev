@@ -16,6 +16,11 @@ enum { PAGE_PATTERN, PAGE_CHOP, PAGE_BASS, PAGE_MIX, PAGE_SONG, PAGE_COUNT };
 extern void (*ui_lock)(void);
 extern void (*ui_unlock)(void);
 
+/* The self-update prompt (src/update.h): the platform passes the updater's status
+ * and a function that starts the install. Without it the prompt never shows. */
+struct UpdateStatus;
+void ui_set_update(const struct UpdateStatus *status, void (*install)(void));
+
 void ui_init(void);
 void ui_button(int btn, int down);
 void ui_tick(int ms);
